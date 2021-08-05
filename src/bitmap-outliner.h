@@ -1,7 +1,21 @@
 #pragma once
 
+#ifdef __riscos
+#define inline /* none */
+typedef unsigned char uint8_t;
+typedef   signed char int8_t;
+typedef   signed short int16_t;
+typedef unsigned short uint16_t;
+typedef unsigned long uint32_t;
+#define SIZE_MAX ((size_t)0xFFFFFFFFlu)
+#define INT8_MAX (0x7F)
+#define UINT8_MAX (0xFF)
+#define INT16_MAX (0x7FFFl)
+#define UINT16_MAX (0xFFFFlu)
+#else
 #include <stdint.h>
 #include <sys/types.h>
+#endif
 
 /**
  * Arrow types.
@@ -18,10 +32,17 @@ typedef enum {
  * Defines arrow.
  */
 typedef struct {
-	uint8_t type:3;     ///< Arrow type.
-	uint8_t inner:1;    ///< Associated path is inner path.
-	uint8_t seen:1;     ///< Has been seen.
-	uint8_t visited:1;  ///< Has been visited.
+#ifdef __riscos
+	int type:3;     ///< Arrow type.
+	int inner:1;    ///< Associated path is inner path.
+	int seen:1;     ///< Has been seen.
+	int visited:1;  ///< Has been visited.
+#else
+    uint8_t type:3;     ///< Arrow type.
+    uint8_t inner:1;    ///< Associated path is inner path.
+    uint8_t seen:1;     ///< Has been seen.
+    uint8_t visited:1;  ///< Has been visited.
+#endif
 } bmol_arrow;
 
 /**
@@ -43,7 +64,11 @@ typedef struct {
 	bmol_path_seg* segments; ///< Path segment buffer.
 	int segments_size;       ///< Path segment buffer length.
 	int segments_cap;        ///< Path segment buffer capacity.
-	bmol_arrow arrow_grid[]; ///< Grid arrows.
+#ifdef __riscos
+    bmol_arrow arrow_grid[1]; ///< Grid arrows.
+#else
+    bmol_arrow arrow_grid[]; ///< Grid arrows.
+#endif
 } bmol_outliner;
 
 /**

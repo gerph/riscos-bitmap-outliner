@@ -2,8 +2,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __riscos
+#else
 #include <unistd.h>
+#endif
 #include "bitmap-outliner.h"
+
+#ifdef C89
+#define DYNAMIC_ARRAY_2D(_type, _name, _limit1, _limit2) _type *_name
+#define DYNAMIC_ARRAY_INDEX(_name, _limit2, _x, _y) _name[(_y) * (_limit2) + _x]
+#else
+#define DYNAMIC_ARRAY_2D(_type, _name, _limit1, _limit2) _type _name[(_limit1)][(_limit2)]
+#define DYNAMIC_ARRAY_INDEX(_name, _limit2, _x, _y) _name[(_y) * (_limit2) + _x]
+#endif
 
 #define MIN_SEGMENTS_COUNT 64
 
@@ -11,7 +22,11 @@
  * Information about how to proceed to next arrow.
  */
 typedef struct {
-	bmol_arr_type arrow:8; ///< Type of arrow.
+#ifdef __riscos
+	int arrow:8; ///< Type of arrow.
+#else
+    bmol_arr_type arrow:8; ///< Type of arrow.
+#endif
 	int8_t dx;             ///< Relative to current position.
 	int8_t dy;             ///< Relative to current position.
 } const arrow_next;
@@ -28,7 +43,46 @@ typedef struct {
 /**
  * The arrow states.
  */
-static arrow_next const states[][2][4] = {
+static arrow_next /*const*/ states[][2][4] = {
+#ifdef C89
+    {0}, // BMOL_ARR_NONE
+    { // BMOL_ARR_RIGHT
+        {
+            {BMOL_ARR_LEFT,  +1,  0}, {BMOL_ARR_UP,   +1, -1},
+            {BMOL_ARR_RIGHT, +1,  0}, {BMOL_ARR_DOWN, +1, +1},
+        }, {
+            {BMOL_ARR_DOWN,  +1, +1}, {BMOL_ARR_DOWN, +1, +1},
+            {BMOL_ARR_RIGHT, +1,  0}, {BMOL_ARR_UP,   +1, -1},
+        },
+    },
+    { // BMOL_ARR_LEFT
+        {
+            {BMOL_ARR_RIGHT, -1,  0}, {BMOL_ARR_DOWN,  0, +1},
+            {BMOL_ARR_LEFT,  -1,  0}, {BMOL_ARR_UP,    0, -1},
+        }, {
+            {BMOL_ARR_UP,     0, -1}, {BMOL_ARR_UP,    0, -1},
+            {BMOL_ARR_LEFT,  -1,  0}, {BMOL_ARR_DOWN,  0, +1},
+        },
+    },
+    { // BMOL_ARR_DOWN
+        {
+            {BMOL_ARR_UP,     0, +2}, {BMOL_ARR_RIGHT, 0, +1},
+            {BMOL_ARR_DOWN,   0, +2}, {BMOL_ARR_LEFT, -1, +1}
+        }, {
+            {BMOL_ARR_LEFT,  -1, +1}, {BMOL_ARR_LEFT, -1, +1},
+            {BMOL_ARR_DOWN,   0, +2}, {BMOL_ARR_RIGHT, 0, +1},
+        },
+    },
+    { // BMOL_ARR_UP
+        {
+            {BMOL_ARR_DOWN,   0, -2}, {BMOL_ARR_LEFT, -1, -1},
+            {BMOL_ARR_UP,     0, -2}, {BMOL_ARR_RIGHT, 0, -1},
+        }, {
+            {BMOL_ARR_RIGHT,  0, -1}, {BMOL_ARR_RIGHT, 0, -1},
+            {BMOL_ARR_UP,     0, -2}, {BMOL_ARR_LEFT, -1, -1},
+        },
+    },
+#else
 	[BMOL_ARR_RIGHT] = {
 		{
 			{BMOL_ARR_LEFT,  +1,  0}, {BMOL_ARR_UP,   +1, -1},
@@ -65,6 +119,7 @@ static arrow_next const states[][2][4] = {
 			{BMOL_ARR_UP,     0, -2}, {BMOL_ARR_LEFT, -1, -1},
 		},
 	},
+#endif
 };
 
 /**
@@ -89,10 +144,18 @@ static void real_coords(bmol_arr_type type, int gx, int gy, int* rx, int* ry) {
 	 * Delta to add to convert to real coordinates.
 	 */
 	static coords const real_delta[] = {
-		[BMOL_ARR_RIGHT] = {0, 0},
-		[BMOL_ARR_LEFT]  = {1, 0},
-		[BMOL_ARR_DOWN]  = {0, 0},
-		[BMOL_ARR_UP]    = {0, 1},
+#ifdef C89
+        {0}, // BMOL_ARR_NONE
+        {0, 0}, // BMOL_ARR_RIGHT
+        {1, 0}, // BMOL_ARR_LEFT
+        {0, 0}, // BMOL_ARR_DOWN
+        {0, 1}, // BMOL_ARR_UP
+#else
+        [BMOL_ARR_RIGHT] = {0, 0},
+        [BMOL_ARR_LEFT]  = {1, 0},
+        [BMOL_ARR_DOWN]  = {0, 0},
+        [BMOL_ARR_UP]    = {0, 1},
+#endif
 	};
 
 	coords const* real = &real_delta[type];
@@ -138,6 +201,7 @@ static int grow_segments(bmol_outliner* outliner) {
  */
 static int push_segment(bmol_outliner* outliner, bmol_arr_type type, int dx, int dy) {
 	bmol_path_seg* segments = outliner->segments;
+    bmol_path_seg* segment;
 
 	if (outliner->segments_size >= outliner->segments_cap) {
 		if (grow_segments(outliner) < 0) {
@@ -147,7 +211,7 @@ static int push_segment(bmol_outliner* outliner, bmol_arr_type type, int dx, int
 		segments = outliner->segments;
 	}
 
-	bmol_path_seg* segment = &segments[outliner->segments_size++];
+	segment = &segments[outliner->segments_size++];
 
 	segment->type = type;
 	segment->dx = dx;
@@ -167,15 +231,16 @@ static int push_segment(bmol_outliner* outliner, bmol_arr_type type, int dx, int
  * @param xd Arrow X-coordinate.
  * @param yd Arrow Y-coordinate.
  */
-static bmol_arrow* search_adjacent_arrow(int width, int height, bmol_arrow grid[height * 2 + 3][width + 3], bmol_arr_type type, int inner, int* xd, int* yd) {
+static bmol_arrow* search_adjacent_arrow(int width, int height, DYNAMIC_ARRAY_2D(bmol_arrow, grid, height * 2 + 3, width + 3), bmol_arr_type type, int inner, int* xd, int* yd) {
 	arrow_next* arrows = &states[type][inner][0];
+    int n;
 
 	// search for adjacent arrows in precedence order
-	for (int n = 0; n < 4; n++) {
-		arrow_next const* search = &arrows[n];
+	for (n = 0; n < 4; n++) {
+		arrow_next * search = &arrows[n];
 		int const xn = *xd + search->dx;
 		int const yn = *yd + search->dy;
-		bmol_arrow* nextArrow = &grid[yn][xn];
+		bmol_arrow* nextArrow = &DYNAMIC_ARRAY_INDEX(grid, width+3, xn, yn);
 
 		// follow adjacent arrow
 		if (nextArrow->type == search->arrow && !nextArrow->seen) {
@@ -224,12 +289,12 @@ static bmol_arrow* search_adjacent_arrow(int width, int height, bmol_arrow grid[
  * @param height Height of bitmap.
  * @param grid Grid to search for paths.
  */
-static int make_path(bmol_outliner* outliner, int x, int y, int width, int height, bmol_arrow grid[height * 2 + 3][width + 3]) {
+static int make_path(bmol_outliner* outliner, int x, int y, int width, int height, DYNAMIC_ARRAY_2D(bmol_arrow, grid, height * 2 + 3, width + 3)) {
 	int xd = x;
 	int yd = y;
 	int xr, yr;
 	int xp, yp;
-	bmol_arrow* arrow = &grid[yd][xd];
+	bmol_arrow* arrow = &DYNAMIC_ARRAY_INDEX(grid, width+3, xd, yd);
 	bmol_arrow* nextArrow = arrow;
 	bmol_arr_type type = arrow->type;
 	int inner = (type == BMOL_ARR_LEFT);
@@ -291,12 +356,13 @@ static int make_path(bmol_outliner* outliner, int x, int y, int width, int heigh
  * @param height Height of bitmap.
  * @param grid Grid to search for paths.
  */
-static void set_path_type(bmol_outliner* outliner, int x, int y, int width, int height, bmol_arrow grid[height * 2 + 3][width + 3]) {
-	bmol_arrow* arrow = &grid[y][x];
+static void set_path_type(bmol_outliner* outliner, int x, int y, int width, int height, DYNAMIC_ARRAY_2D(bmol_arrow, grid, height * 2 + 3, width + 3)) {
+	bmol_arrow* arrow = &DYNAMIC_ARRAY_INDEX(grid, width+3, x, y);
 	bmol_arr_type type = arrow->type;
 	int const inner = (type == BMOL_ARR_LEFT);
 
 	do {
+        int n;
 		arrow_next* arrows = &states[type][inner][1]; // ignore opponent arrow
 
 		// mark as visited
@@ -306,11 +372,11 @@ static void set_path_type(bmol_outliner* outliner, int x, int y, int width, int 
 		type = BMOL_ARR_NONE;
 
 		// search for adjacent arrows in precedence order
-		for (int n = 0; n < 3; n++) {
+		for (n = 0; n < 3; n++) {
 			arrow_next* search = &arrows[n];
 			int xn = x + search->dx;
 			int yn = y + search->dy;
-			bmol_arrow* nextArrow = &grid[yn][xn];
+			bmol_arrow* nextArrow = &DYNAMIC_ARRAY_INDEX(grid, width+3, xn, yn);
 
 			// follow adjacent arrow
 			if (nextArrow->type == search->arrow && !nextArrow->visited) {
@@ -332,14 +398,15 @@ static void set_path_type(bmol_outliner* outliner, int x, int y, int width, int 
  * @param height Height of bitmap.
  * @param grid Grid to search for paths.
  */
-static int search_paths(bmol_outliner* outliner, int width, int height, bmol_arrow grid[height * 2 + 3][width + 3]) {
+static int search_paths(bmol_outliner* outliner, int width, int height, DYNAMIC_ARRAY_2D(bmol_arrow, grid, height * 2 + 3, width + 3)) {
 	int const gridWidth = width + 3;
 	int const gridHeight = height * 2 + 3;
+    int x, y;
 
 	// set arrow types
-	for (int y = 1; y < gridHeight - 1; y += 2) {
-		for (int x = 1; x < gridWidth - 1; x++) {
-			bmol_arrow arrow = grid[y][x];
+	for (y = 1; y < gridHeight - 1; y += 2) {
+		for (x = 1; x < gridWidth - 1; x++) {
+			bmol_arrow arrow = DYNAMIC_ARRAY_INDEX(grid, width+3, x, y);
 
 			if (arrow.type && !arrow.visited) {
 				set_path_type(outliner, x, y, width, height, grid);
@@ -348,9 +415,9 @@ static int search_paths(bmol_outliner* outliner, int width, int height, bmol_arr
 	}
 
 	// search right and left arrows in grid
-	for (int y = 1; y < gridHeight - 1; y += 2) {
-		for (int x = 1; x < gridWidth - 1; x++) {
-			bmol_arrow arrow = grid[y][x];
+	for (y = 1; y < gridHeight - 1; y += 2) {
+		for (x = 1; x < gridWidth - 1; x++) {
+			bmol_arrow arrow = DYNAMIC_ARRAY_INDEX(grid, width+3, x, y);
 
 			if (arrow.type && !arrow.seen) {
 				if (make_path(outliner, x, y, width, height, grid) < 0) {
@@ -371,36 +438,36 @@ static int search_paths(bmol_outliner* outliner, int width, int height, bmol_arr
  * @param map The bitmap.
  * @param grid Grid to fill with arrows.
  */
-static void set_arrows(int width, int height, uint8_t const map[height][width], bmol_arrow grid[height * 2 + 3][width + 3]) {
+static void set_arrows(int width, int height, DYNAMIC_ARRAY_2D(uint8_t const, map, height, width), DYNAMIC_ARRAY_2D(bmol_arrow, grid, height * 2 + 3, width + 3)) {
 	int x, y, t;
 
 	for (x = 0; x < width; x++) {
 		for (y = 0, t = 0; y < height; y++) {
-			int p = map[y][x] != 0;
+			int p = DYNAMIC_ARRAY_INDEX(map, width, x, y) != 0;
 
 			if (p != t) {
-				grid[y * 2 + 1][x + 1].type = t ? BMOL_ARR_LEFT : BMOL_ARR_RIGHT;
+				DYNAMIC_ARRAY_INDEX(grid, width+3, x + 1, y * 2 + 1).type = t ? BMOL_ARR_LEFT : BMOL_ARR_RIGHT;
 				t = p;
 			}
 		}
 
-		if (map[y - 1][x]) {
-			grid[y * 2 + 1][x + 1].type = BMOL_ARR_LEFT;
+		if (DYNAMIC_ARRAY_INDEX(map, width, x, y-1)) {
+			DYNAMIC_ARRAY_INDEX(grid, width+3, x+1, y * 2 + 1).type = BMOL_ARR_LEFT;
 		}
 	}
 
 	for (y = 0; y < height; y++) {
 		for (x = 0, t = 0; x < width; x++) {
-			int p = map[y][x] != 0;
+			int p = DYNAMIC_ARRAY_INDEX(map, width, x, y) != 0;
 
 			if (p != t) {
-				grid[y * 2 + 2][x + 1].type = t ? BMOL_ARR_DOWN : BMOL_ARR_UP;
+				DYNAMIC_ARRAY_INDEX(grid, width+3, x + 1, y * 2 + 2).type = t ? BMOL_ARR_DOWN : BMOL_ARR_UP;
 				t = p;
 			}
 		}
 
-		if (map[y][x - 1]) {
-			grid[y * 2 + 2][x + 1].type = BMOL_ARR_DOWN;
+		if (DYNAMIC_ARRAY_INDEX(map, width, x-1, y)) {
+			DYNAMIC_ARRAY_INDEX(grid, width+3, x + 1, y * 2 + 2).type = BMOL_ARR_DOWN;
 		}
 	}
 }
@@ -445,11 +512,19 @@ bmol_path_seg const* bmol_find_paths(bmol_outliner* outliner, int* out_size) {
 
 	outliner->segments_size = 0;
 
-	set_arrows(width, height, (const uint8_t (*)[width])data, (bmol_arrow (*)[width])grid);
+#ifdef C89
+	set_arrows(width, height, (const uint8_t *)data, grid);
 
-	if (search_paths(outliner, width, height, (bmol_arrow (*)[width])grid) < 0) {
-		return NULL;
-	}
+    if (search_paths(outliner, width, height, grid) < 0) {
+        return NULL;
+    }
+#else
+    set_arrows(width, height, (const uint8_t (*)[width])data, (bmol_arrow (*)[width])grid);
+
+    if (search_paths(outliner, width, height, (bmol_arrow (*)[width])grid) < 0) {
+        return NULL;
+    }
+#endif
 
 	if (out_size) {
 		*out_size = outliner->segments_size;
@@ -534,7 +609,8 @@ static int log10_fast(uint32_t n) {
  * @param size_ref A reference to the buffer size.
  */
 static void write_svg(bmol_path_seg const* segments, int count, buffer_ctx* ctx) {
-	for (int i = 0; i < count; i++) {
+    int i;
+	for (i = 0; i < count; i++) {
 		bmol_path_seg const* segment = &segments[i];
 
 		switch (segment->type) {
@@ -567,8 +643,9 @@ static void write_svg(bmol_path_seg const* segments, int count, buffer_ctx* ctx)
 
 size_t bmol_svg_path_len(bmol_outliner* outliner) {
 	int len = 0;
+    int i;
 
-	for (int i = 0; i < outliner->segments_size; i++) {
+	for (i = 0; i < outliner->segments_size; i++) {
 		bmol_path_seg const* segment = &outliner->segments[i];
 		int dx = segment->dx;
 		int dy = segment->dy;
@@ -612,11 +689,11 @@ size_t bmol_svg_path_len(bmol_outliner* outliner) {
 }
 
 size_t bmol_svg_path(bmol_outliner* outliner, char buffer[], size_t buf_size) {
-	buffer_ctx ctx = {
-		.buffer = buffer,
-		.buf_size = buf_size,
-		.size = 0,
-	};
+	buffer_ctx ctx;
+
+    ctx.buffer = buffer;
+	ctx.buf_size = buf_size;
+	ctx.size = 0;
 
 	write_svg(outliner->segments, outliner->segments_size, &ctx);
 

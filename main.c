@@ -1,9 +1,10 @@
 #if 0
-gcc -Wall -O2 -I./src -o /tmp/`basename $0` $0 src/bitmap-outliner.c \
+gcc -Wall -O2 -DC89 -I./src -o /tmp/`basename $0` $0 src/bitmap-outliner.c \
 	&& /tmp/`basename $0` $@
 exit
 #endif
 
+#include <stdlib.h>
 #include <stdio.h>
 #include "bitmap-outliner.h"
 
@@ -22,6 +23,8 @@ uint8_t const data[] = {
 int main() {
 	// allocate outliner
 	bmol_outliner* outliner = bmol_alloc(width, height, data);
+    size_t path_len;
+    char *path;
 
 	// find paths in bitmap
 	bmol_find_paths(outliner, NULL);
@@ -29,10 +32,15 @@ int main() {
 	// calculate SVG path length (needs some performance).
 	// for numerous calls to `bmol__svg_path`,
 	// better use a large enough buffer directly.
-	size_t path_len = bmol_svg_path_len(outliner);
+	path_len = bmol_svg_path_len(outliner);
 
 	// ok for small bitmaps; be aware to not use large buffers on the stack!
-	char path[path_len];
+	path = malloc(path_len);
+    if (path == NULL)
+    {
+        printf("Failed to allocate space for path\n");
+        return 1;
+    }
 
 	// write SVG path to `path`
 	bmol_svg_path(outliner, path, path_len);
@@ -45,6 +53,8 @@ int main() {
 
 	// free outliner
 	bmol_free(outliner);
+
+    free(path);
 
 	return 0;
 }
